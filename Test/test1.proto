@@ -1,0 +1,39 @@
+syntax = "proto3";
+package samples;
+package pb;
+option go_package = "./;xmsg";
+import "common.proto";
+import "ds_common.proto";
+import "errcode.proto";
+import "cs_rank.proto";
+import "cs_mpdeposit.proto";
+
+// comment
+message PayloadMessage {// comment
+
+
+    string timestamp  = 2;
+    string name       = 1;
+    
+    bool complete     = 5;
+    Topology topology = 6;
+
+    int32 id          = 3;
+    float rating      = 4;
+    
+    enum Topology {
+        /*comment*/
+        FLAT             = 0;// comment
+        NESTED_OBJECT    = 1;
+        NESTED_MESSAGE   = 2;
+        ARRAY_OF_TYPE    = 3;
+        ARRAY_OF_OBJECT  = 4;
+        ARRAY_OF_MESSAGE = 5;
+        /*
+        comment
+        // comment
+        */
+    }
+
+}
+

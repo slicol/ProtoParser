@@ -1,0 +1,189 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "./;xmsg";
+import "common.proto";
+import "ds_common.proto";
+import "errcode.proto";
+import "cs_rank.proto";
+import "cs_mpdeposit.proto";
+
+// 获取生涯统计数据
+message CSSeasonGetTotalDataReq
+{ 
+    MatchModeInfo mode = 1; // 游戏玩法模式
+    uint64 player_id = 2;   // 玩家id，不填拉当前登录玩家的，填了拉指定玩家的
+
+}
+message CSSeasonGetTotalDataRes
+{
+    Err result = 1;
+    // 角色界面的整个游戏生涯统计数据,100开始
+    uint32 total_fight          = 100; // 总对局数量
+    float  kd                   = 101; // kd
+    uint32 total_escaped        = 102; // 总逃离, 可以用于计算逃离率
+    uint64 avg_survival_time    = 103; // 平均存活时长
+    uint32 max_escape_streak    = 104; // 最大连续逃离数
+    uint64 total_game_time      = 105; // 对局总时长
+    uint64 carry_teammate_assets = 106; // 累计帮带资产 (拾取到队友绑定的道具的卖店价值, ms18 reserved)
+
+    // 角色界面按照不同玩法模式进行的分类统计,200开始
+    // 逐步废弃掉前面的统计(tag 100~106)
+
+    oneof data {
+        IrisSOLData  sol_data    = 200; // sol玩法数据统计
+        IrisRaidData raid_data   = 201; // raid玩法数据统计
+        MPData       mp_data     = 202; // mp玩法数据统计
+    }
+}
+
+// 获取赛季信息
+message CSSeasonGetInfoReq
+{
+    int32 serial = 1; // -1=生涯总数据, 0=获取当前赛季,并返回起始赛季begin_serial,用于计算下拉选项
+    uint64 player_id = 2; // 玩家id，不填拉登录玩家的，填了拉指定玩家的 
+
+    // 预留类型字段，用于区分sol，大世界等
+}
+message CSSeasonGetInfoRes 
+{
+    Err result = 1;
+    uint32 cur_serial = 2;          // 当前赛季
+    uint32 begin_serial = 3;        // 起始赛季
+    ProfileSeasonInfo season_info = 4; // 赛季信息
+}
+
+// 获取赛季历史战绩列表
+// 分页获取
+message CSSeasonGetRecordListReq
+{
+    uint32 page = 1;                // 第几页, 1开始
+    uint32 num = 2;                 // 一页的数量
+    MatchModeInfo mode = 3;         // 区分战区突袭、特别行动、多人对战即可
+    uint64 player_id = 4;           // 玩家id，不填拉登录玩家的，填了拉指定玩家的
+}
+message CSSeasonGetRecordListRes
+{
+    Err result = 1;
+    repeated MatchBaseRecord record_list = 2;     
+    uint32 page = 3;
+    uint32 num = 4;
+    uint32 max_page = 5;            // 最多到多少页   
+}
+
+// 获取赛季历史战绩详情
+message CSSeasonGetRecordReq 
+{
+    string         key  = 1;
+    MatchModeInfo  mode = 2; // 游戏模式(方便后台定位不同的战绩列表)
+    bool           show_teammates_only = 3; // 是否只显示队友战绩(MP模式专用)
+    uint64         show_player_id = 4;      // 玩家id，如果为0则取当前玩家
+}
+message CSSeasonGetRecordRes 
+{
+    Err result = 1;
+
+    repeated PlayerMatchRecord player_record = 2;   // 小队玩家战绩
+    EGspPlayerResultType game_result         = 7;   // 游戏结果
+}
+
+// 特别行动地图列表
+message CSSeasonRaidMapListReq
+{
+}
+
+message RaidMapItem
+{
+    string map_name = 1;
+    uint32 map_id   = 2;
+}
+
+message CSSeasonRaidMapListRes
+{
+    Err result = 1;
+    repeated RaidMapItem maps = 2;
+}
+
+// ----------------------------- 排位赛相关 ------------------------------- //
+
+
+// 赛季服务维护的几个排位赛排行榜（底层由ranksvr统一维护）
+enum SeasonRankList {
+    RankList_Invalid = 0; // 无效
+
+    SOL_Global = 1; // sol全服排行榜
+    SOL_Friends = 2; // sol好友排行榜
+
+    RAID_Global = 3; // raid全服排行榜
+    Raid_Friends = 4; // raid好友排行榜
+
+    TDM_Global = 5; // tdm全服排行榜
+    TDM_Friends = 6; // tdm好友排行榜
+};
+
+message CSSeasonGetRankListReq 
+{
+    uint32          season_no   = 1; // 指定赛季编号（为0时表示当前赛季）
+    SeasonRankList  which       = 2; // 榜单类型（这个需要指定，服务器据此映射到具体的榜单）
+    uint32          page_size   = 3; // 分页大小（默认值50）
+    uint32          page_no     = 4; // 指定分页1-based编号（0是无效编号）
+}
+
+message CSSeasonGetRankListRes
+{
+    Err result = 1;
+
+    uint32 total = 2; // 总共有多少
+    uint32 page = 3; // 当前pageno
+    uint32 page_max = 4; // 最大pageno
+
+    repeated RankItem list = 5; // 当前page
+}
+
+message CSSeasonRankRecvAwardReq {
+    uint32 mode   = 1; // 0/1:sol, 2:mp
+    uint32 season = 2; // 指定赛季编号，默认是当前赛季
+    repeated uint32 levels = 3; // 要领取奖励的levels
+}
+
+message CSSeasonRankRecvAwardRes {
+    Err result = 1;
+    DataChange     data_change    = 2;  // data change
+}
+
+message CSSeasonRankScoreChangedNtf {
+    int32 mode  = 1; // 1:sol,2:raid,3:mp
+    int64 score = 2; // 最新排位分
+    int64 score_old =3; // 旧排位分
+
+    // 大战场积分赛模式使用
+    int64 score_shoot   = 10; // 射击维度总积分
+    int64 score_tactics = 11; // 战术维度总积分
+    int64 score_vehicle = 12; // 载具维度总积分
+}
+
+///////////////////////////// Deprecated ////////////////////////////////
+
+// 查看他人的生涯统计数据 (deprecated)
+message CSSeasonLoadTotalDataReq
+{ 
+    option deprecated = true;
+
+    uint64 player_id = 1;
+}
+message CSSeasonLoadTotalDataRes
+{
+    option deprecated = true;
+
+    Err result               = 1;
+    PlayerSimpleInfo info    = 2; // 玩家基础信息
+
+    // 角色界面的整个游戏生涯统计数据,100开始
+
+    uint32 total_fight       = 100; // 总对局数量
+    float  kd                = 101; // kd
+    uint32 total_escaped     = 102; // 总逃离, 可以用于计算逃离率
+    uint64 avg_survival_time = 103; // 平均存活时长
+    uint32 max_escape_streak = 104; // 最大连续逃离数
+    uint64 total_game_time   = 105; // 对局总时长
+}

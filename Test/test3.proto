@@ -1,0 +1,423 @@
+syntax = "proto3";
+package pb;
+option go_package = "./;xmsg";
+import "common.proto";
+import "ds_common.proto";
+import "cs_mpdeposit.proto";
+
+
+message ActivityAward
+{
+    PropInfo prop = 1;
+    bool received = 2; // 已领取
+    int32 mode_config = 3; // 奖励可以在什么模式中使用（仅展示用），0:全模式,1:sol,2:mp
+}
+
+message ActivityMilestoneAward
+{
+    uint64 currency_num = 1; // 需要的货币数量
+    repeated ActivityAward prop = 2;
+
+    // TODO 为了让所有东西更好地随配置表刷新，应该使用reward_id来代替currency_num作为判等更新的参考条件 
+    // int64 reward_id = 3; // 配置表里的奖励项id
+}
+
+// 兑换物品
+message ActivityExchangeProp
+{
+    uint64 exchange_id    = 1; // ✅
+    int32 exchanged_count = 4; // ✅已兑换次数
+
+    uint64      currency_num      = 2; // 🈲需要的货币数量
+    PropInfo    prop              = 3; // 🈲兑换的物品
+    int32       exchange_count_max = 5; // 🈲最大兑换次数
+}
+
+// 签到类活动
+message AttendState
+{
+    uint32 day      = 1; // 签到天DayNumber
+    uint32 state    = 2; // 0:未签到，1:已签到，2:已领奖
+}
+message AttendInfo
+{
+    uint32   attend_times              = 1;  // ✅签到次数 (TODO 理论上用len(states)可以代替)
+    int64    first_attend_time         = 2;  // ✅首次签到时间
+    int64    last_attend_time          = 3;  // ✅最近一次签到时间
+    int64    next_attend_time          = 4;  // 🈲下次可签到时间戳（如果目前可签到，则此处为0)
+    repeated AttendState    states      = 5; // ✅使用这个代替map
+
+    // 非存储属性
+    repeated ActivityAward  daily_award = 10;  // 🈲每日礼物
+}
+
+//---------------------------- 活动类型 -----------------------------//
+/*
+    每日：2
+    签到类：30, 42
+    兑换类：11, 44
+    里程碑：12, 40, 43
+    不常用：5, 13
+*/
+// 按逻辑相关性重新组织下
+enum ActivityType
+{
+    ActivityTypeUnknown         = 0;  // 未知
+    ActivityTypeDaily           = 2;  // 每日任务
+    ActivityTypeAnnouncement    = 5;  // 公告
+    ActivityTypeExchangeTask    = 11; // 非纯兑换活动（做任务获取活动代币，然后再拿代币来兑换）
+    ActivityTypeMilestoneTask   = 12; // 里程碑
+    ActivityTypeMainpage        = 13; // 首页大屏
+    ActivityTypeAttend          = 30; // 签到类
+    ActivityTypeRecruitGrowthMilestone  = 40 [deprecated=true]; // 成长里程碑（客户端已删除逻辑，与 `12` 相比只是启动时间不同）
+    ActivityTypeRecruitTraining         = 41; // 新兵营特训
+    ActivityTypeRecruitAttend           = 42; // 新兵报到
+    ActivityTypeRecruitNewMilestone     = 43; // 新里程碑形态（7天各种任务全显示，无可做任务数量限制）
+    ActivityTypeExchangeOnly            = 44; // 纯兑换类活动（没有任务，只兑换，兑换所需物品来自其他活动的藏品奖励）
+    ActivityTypeExchangeTaskV2  = 45; // 非纯兑换活动（在 `11` 基础上视觉改版，后台逻辑一致）
+    ActivityTypeMilestoneTaskV2 = 46; // 里程碑（在 `12` 基础上视觉改版，后台逻辑一致）
+}
+
+// 任务状态
+enum ActivityTaskState
+{
+    ActivityTaskStateLocked     = 0;  // 未解锁
+    ActivityTaskStateUnaccepted = 1;  // 未接受
+    ActivityTaskStateAccepted   = 2;  // 已经接受
+    ActivityTaskStateCompleted  = 3;  // 已经达成所有必须目标，没有领取奖励
+    ActivityTaskStateRewarded   = 4;  // 已经领取奖励
+}
+
+// 活动任务目标
+message ActivityObjective
+{
+    uint64 id           = 1; // ✅任务目标id
+    bool  completed     = 2; // ✅任务目标是否完成 (TODO 现在一旦完成后就不随配置表走了)
+    int64 progress      = 3; // ✅进度当前值
+    int64 progress_max  = 4; // 🈲进度最大值
+
+    // 目标完成的限制条件
+    ActivityObjectiveConditions conditions = 5 [deprecated=true]; // (TODO 确定下这个是否有使用，目前看没有使用)
+    repeated uint32 window = 6; // 最近场次完成指定合同id的记录, window[idx]=1表示对应场次有完成
+}
+
+message ActivityObjectiveConditions {
+    bool check_basic_condition1 = 1; // 基础条件p1~p4
+    bool check_basic_condition2 = 2;
+    bool check_basic_condition3 = 3;
+    bool check_basic_condition4 = 4;
+    bool check_basic_condition5 = 5; // 基础条件mapid 
+    bool check_basic_condition6 = 6; // 基础条件ListParam
+
+    map<uint64,bool> ext_conditions = 10; // 扩展条件ConditionIDArray
+}
+
+// 活动任务
+message ActivityTaskInfo
+{
+    uint64   task_id                     = 1;  // 任务ID
+    int32    task_type                   = 2;  // 任务类型
+    int32    state                        = 3;  // 任务状态  ActivityTaskState
+    int64    accept_time                  = 4;  // 接取时间
+    int64    complete_time                = 5;  // 完成时间
+    repeated int64 var                    = 6 [deprecated=true];  // 任务变量
+    repeated ActivityObjective objectives = 7;  // 任务目标
+    repeated ActivityTaskInfo child      = 8 [deprecated=true];  // 子任务（过度设计了）
+
+    ActivityAward award                  = 9 [deprecated=true]; // 任务完成奖励 (1个任务知会有1个奖励)
+    int64    start_time                  = 10; // 任务开始时间（不到就展示倒计时）
+    int64    end_time                    = 11; // 任务关闭时间 (不是做完时间）
+
+    bool     invalid                     = 20; // 策划会删除下架配置表中的任务
+
+    repeated ActivityAward awards        = 21; // 任务完成奖励 (1个任务现在会有多个1个奖励)
+
+    uint64   jump_id                     = 22; // 跳转id
+    uint64   mode_tag                    = 23; // 模式倾向性
+
+    string  name = 30; // 名字信息
+    string  desc = 31; // 描述信息
+}
+
+// 活动第一个版本的设计实现，没有考虑清楚哪些应该是存储属性、非存储属性，导致后续策划更新配置表时出现很多问题
+//
+// Note: 
+// 1 玩家DB中使用的是 DBActivityInfo，
+// 2 这里的ActivityInfo全部是为了客户端这边的展示，CS协议返回给客户端的数据，会显示通过一个转换操作，将前者转换为后者
+message ActivityInfo
+{
+    uint64     actv_id    = 1; // 活动ID
+    int32      actv_type  = 2; // 活动类型 ActivityType
+
+    int64      start_date = 3; // 开始日期(时间戳)
+    int64      end_date   = 4; // 结束日期
+
+    bool       is_tracking = 5; // 跟踪中 (see also: manual_tracking)
+
+    // 客户端lua代码不支持oneof，所以这里每种活动类型专属信息定义不使用oneof
+
+    // 1. 签到类(普通签到30+新兵报到42)活动的专属信息
+    AttendInfo attend_info = 6; // 签到类活动的信息
+
+    // 2. 任务类活动
+    repeated   ActivityTaskInfo task_info           = 7;  // 任务信息
+    repeated   ActivityTaskInfo expired_task_info   = 99; // 被下掉的任务信息
+
+    // 3. 公告类活动
+    string     content = 8; // 公告内容
+
+    // x. 活动货币，用以兑换物品、兑换里程碑奖励
+    // 非存储属性，返回给客户端时填充这两个字段
+    uint64 currency_id  = 9;  // 货币id, see: Activity.csv表Currency字段
+    uint64 currency_num = 10; // 货币数量，see: DBPlayerActivity.currencies
+    // x. 放置在标签展示、展示顺序
+    int32  tab_belonging   = 11; // 归属到那个页签
+    bool   manual_tracking = 12; // 需要手动跟踪
+    int32  order_weight    = 13; // 在页签中排序权重
+
+    // y. 活动的奖励，有的是非存储属性，仅用于客户端展示
+    repeated ActivityMilestoneAward milestone_award = 14; // 里程碑奖励列表 (存储，虽然可以通过活动货币可以算出来stage，但是要避免重复发奖励）
+    repeated ActivityExchangeProp   exchange_item   = 16; // 可兑换物品表 (存储，需要记录兑换次数）
+
+    // 最终奖励
+    repeated ActivityAward          final_award     = 15; // 最终奖励表 (不存储，仅展示）
+    bool final_award_received                       = 20; // 最终奖励已领取（存储，需要记录最终领奖状态）
+
+    // 5. 新兵里程碑每次仅显示3个    
+    repeated ActivityTaskInfo recruit_ms_tasks = 30; // 新兵里程碑当前展示的任务列表
+
+    // 活动下任务的下次刷新时间 (unix seconds)
+    int64 next_refresh_time = 31;  // 普通里程碑、兑换、每日任务需要设置 (TODO 貌似也不应该存储)
+
+    // 非存储属性，对齐csv配置描述
+    int32 mode_leaning = 32; // 模式倾向性
+    int32 mode_tag     = 33; // 模式标签
+
+    uint32 card_display = 34; // 卡片显示信息
+    string info1        = 35;
+    string info2        = 36;
+    string name         = 37;
+    string desc         = 38; // 描述信息
+    string details      = 39; // 详细描述信息
+    uint64 reward_showed1 = 40;
+    uint64 reward_showed2 = 41;
+    uint64 reward_showed3 = 42;
+
+    bool invalid       = 100; // 因为某些原因该活动被标记为无效，如策划删除了下面所有的tasks
+}
+
+message CSActivityGetReq
+{
+}
+
+message CSActivityGetRes
+{
+    int32    result                  = 1;
+    repeated ActivityInfo actv_infos = 2; // 活动数据
+    int32    max_tracking_num        = 3; // 最大跟踪数量
+}
+
+// 携带与前台交互时的一些字段
+//
+// TODO：这个协议定义似乎有点冗余，已经有ActivityTaskInfo了，能理解其想只返回最少数据的需求，
+//       但是这个协议也没有起到应该发挥的作用，最后，玩家客户端需要的奖励展示、任务进度都少不了
+//
+// 截止到ms24，前后台这个字段使用的挺多的，暂时先保留，择机再考虑处理
+message CSActivityTask
+{
+    uint64 actv_id  = 1;  // 活动ID
+    uint64 task_id = 2;  // 任务ID
+    int32  state    = 3;  // 任务状态  ActivityTaskState
+    repeated ActivityObjective objectives = 4;
+}
+
+// 接受任务
+message CSActivityTaskAcceptReq
+{
+    uint64 actv_id  = 1;  // 活动ID
+    uint64 task_id = 2;  // 任务ID
+}
+
+message CSActivityTaskAcceptRes
+{
+    int32           result = 1;
+    CSActivityTask task  = 2;
+}
+
+
+// 领取任务奖励
+message CSActivityTaskReceiveAwardReq
+{
+    repeated CSActivityTask tasks = 1;  // 任务
+}
+
+message CSActivityTaskReceiveAwardRes
+{
+    int32      result                 = 1;
+    repeated  CSActivityTask tasks = 2;
+    repeated  ActivityInfo  actv_infos = 4; // 此次变更活动
+    DataChange data_change            = 3;
+}
+
+// 签到
+message CSActivityAttendReq
+{
+    // Deprecated: 调用方调用时一次只能签到1个活动，用repeated属于接口过度设计, use activity_id instead.
+    repeated uint64 actv_id  = 1 [deprecated=true];  // 活动ID
+
+    uint64 activity_id = 2; // 活动ID
+}
+
+message CSActivityAttendRes
+{
+    int32 result = 1;
+
+    // Deprecated: use activity_info instead.
+    repeated ActivityInfo actv_infos = 2 [deprecated=true]; // 此次变更的签到活动
+
+    DataChange     data_change    = 3;  // sol data change
+    CSMPDataChange mp_data_change = 4;  // mp data change
+
+    ActivityInfo activity_info = 5; 
+}
+
+// 领取签到奖励
+message CSActivityRecvAttendAwardReq {
+    uint64 activity_id = 1; // 签到活动id
+    uint32 day_number      = 2; // 领取哪一天的签到奖励，see: ActivityAttendDays中的DayNumber
+}
+
+message CSActivityRecvAttendAwardRes {
+    int32 result = 1;
+
+    DataChange     data_change    = 2;  // sol data change
+    CSMPDataChange mp_data_change = 3;  // mp data change
+
+    ActivityInfo activity_info = 4;
+}
+
+// 追踪
+message CSActivityTrackReq {
+    repeated uint64 actv_id  = 1;  // 活动ID
+}
+
+message CSActivityTrackRes {
+    int32 result = 1;
+    repeated ActivityInfo actv_infos = 2; // 此次变更活动
+    int32 max_tracing_num = 3;
+}
+
+// 取消追踪
+message CSActivityUntrackReq {
+    repeated uint64 actv_id  = 1;  // 活动ID
+}
+
+message CSActivityUntrackRes {
+    int32 result = 1;
+    repeated ActivityInfo actv_infos = 2; // 此次变更活动
+}
+
+
+// 兑换指令
+message CSActivityExchange
+{
+    uint64 actv_id = 1;
+    repeated uint64 exchange_id =2; // 可兑换奖励的ID
+
+    uint64 currency_id = 3 [deprecated=true]; // 货币（废弃）
+    int64 currency_num = 4 [deprecated=true]; // 货币数量（废弃）
+}
+// 兑换
+message CSActivityExchangeReq
+{
+    // WARN: 调用方调用时一次只能签到1个活动，用repeated属于接口过度设计
+    repeated CSActivityExchange exchanges  = 1;  // 交互指令
+}
+
+message CSActivityExchangeRes
+{
+    int32 result = 1;
+
+    repeated ActivityInfo actv_infos = 2; // 此次变更活动
+    DataChange     data_change    = 3;  // sol data change
+    CSMPDataChange mp_data_change = 4;  // mp data change
+}
+
+// 里程碑信息
+message CSActivityMilestone
+{
+    option deprecated = true;
+    uint64 actv_id = 1;
+    repeated int32 stages = 2; // 领哪些阶段，需要手动指定阶段 (1-based)
+}
+
+// 领取里程碑奖励
+message CSActivityReceiveMilestoneAwardReq
+{
+    repeated CSActivityMilestone actvs = 1 [deprecated=true];  // 任务里程碑
+
+    uint64 actv_id = 2;
+    repeated int32 stages = 3; // 领哪些阶段，需要手动指定阶段 (1-based)
+}
+
+message CSActivityReceiveMilestoneAwardRes
+{
+    int32      result                 = 1;
+    repeated ActivityInfo actv_infos  = 2; // 此次变更活动
+    DataChange data_change            = 3;
+}
+
+// 领取最终奖励
+message CSActivityReceiveFinalAwardReq
+{
+    repeated uint64 actv_ids = 1;  // 活动ID列表
+}
+
+message CSActivityReceiveFinalAwardRes
+{
+    int32      result                 = 1;
+    repeated ActivityInfo actv_infos  = 2; // 此次变更活动
+    DataChange data_change            = 3;
+}
+
+// 通知客户端活动任务状态变化
+message CSActivityUpdateProgressNtf {
+    repeated CSActivityTask data = 1;
+}
+
+////////////////////////////////////////////////////////////////////////////
+
+// 活动首页配置请求
+message CSActivityGetBannersReq {
+    //int32 mode = 1;  // 0-不限制，1-sol，2-mp
+}
+
+message CSActivityGetBannersRes {
+    int32 result = 1;
+    repeated Banner banners = 2;
+}
+
+message Banner {
+    uint64 id = 1;
+    string diy_string1 = 2;
+    string diy_string2 = 3;
+
+    uint64 appear_time = 4; // 显示时间
+    uint64 unlock_time = 5; // 解锁时间，意味着可以点击跳转
+    uint64 disappear_time = 6; // 消失时间
+
+    uint32 position = 7; // 控制展示区域
+    int32 weight = 8; // 展示优先权重
+    int32 mode_tag = 9; // 此banner左上角显示什么模式
+    int32 mode_visibility = 10 [deprecated=true]; // 模式可见性，已废弃，各模式看到的以后是一样的
+
+    bool is_new = 20 [deprecated=true]; // 客户端先本地记录下，曝光后就不展示了
+    bool is_hot = 21; // 是否热点
+
+    uint64 jump_id = 22; // 跳转id
+    string pic_resource = 34; // 图片链接
+
+    bool is_subtitle_show_time = 40; // 是否在副标题显示活动时间
+    uint64 connected_event = 41; // 目前只关联活动ID
+    uint32 banner_type = 42; // banner类型，1：常规banner，2：强关联banner
+}
